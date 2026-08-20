@@ -1,3 +1,5 @@
+[English version](README.en.md)
+
 # hh515lm-reboot
 
 Skrypt [`router_restart.py`](router_restart.py) restartuje router przez jego lokalne API WWW. Nawiązuje szyfrowaną sesję z panelem, loguje się danymi użytkownika i wysyła polecenie restartu.
