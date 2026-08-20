@@ -9,8 +9,10 @@ import getpass
 import hashlib
 import hmac
 import http.client
+from html.parser import HTMLParser
 import json
 import os
+import re
 import secrets
 import string
 import sys
@@ -30,10 +32,26 @@ except ImportError as error:
     ) from error
 
 
-API_PATH = "/jrd/webapi"
-VERIFICATION_KEY = "KSDHSDFOGQ5WERYTUIQWERTYUISDFG1HJZXCVCXBN2GDSMNDHKVKFsVBNf"
-USERNAME_KEY = "e5dl12XYVggihggafXWf0f2YSf2Xngd1"
 ALPHABET = string.ascii_letters + string.digits
+MAX_HTML_SIZE = 512 * 1024
+MAX_SCRIPT_SIZE = 10 * 1024 * 1024
+
+
+class ScriptSourceParser(HTMLParser):
+    """Zbiera adresy skryptów z dokumentu panelu routera."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sources: list[str] = []
+
+    def handle_starttag(
+        self, tag: str, attrs: list[tuple[str, str | None]]
+    ) -> None:
+        if tag.lower() != "script":
+            return
+        source = dict(attrs).get("src")
+        if source:
+            self.sources.append(source)
 
 
 class RouterError(RuntimeError):
@@ -76,11 +94,11 @@ def decrypt_payload(encoded: str, password: str) -> str:
     return (unpadder.update(padded) + unpadder.finalize()).decode()
 
 
-def encode_username(username: str) -> str:
+def encode_username(username: str, username_key: str) -> str:
     """Koduje nazwę użytkownika algorytmem panelu TCL."""
     result: list[str] = []
     for index, character in enumerate(username):
-        key_code = ord(USERNAME_KEY[index % len(USERNAME_KEY)])
+        key_code = ord(username_key[index % len(username_key)])
         char_code = ord(character)
         result.append(chr((key_code & 0xF0) | ((char_code & 0x0F) ^ (key_code & 0x0F))))
         result.append(chr((key_code & 0xF0) | ((char_code >> 4) ^ (key_code & 0x0F))))
@@ -96,12 +114,124 @@ class TclRouterApi:
         self.host = parsed_url.hostname
         self.port = parsed_url.port
         self.origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
-        self.api_path = parsed_url.path.rstrip("/") + API_PATH
+        self.panel_url = f"{self.origin}{parsed_url.path or '/'}"
+        self.api_path = ""
         self.timeout = timeout
         self.session_id = ""
         self.tmp_key = ""
         self.hmac_key = ""
         self.token = ""
+        self.verification_key = ""
+        self.verification_header = ""
+        self.token_header = ""
+        self.username_key = ""
+        self.default_username = ""
+
+    def _get_text(self, url: str, max_size: int) -> str:
+        parsed_url = urllib.parse.urlsplit(url)
+        if (
+            parsed_url.scheme != self.scheme
+            or parsed_url.hostname != self.host
+            or parsed_url.port != self.port
+        ):
+            raise RouterError("Panel wskazał skrypt spoza adresu routera.")
+
+        connection_class = (
+            http.client.HTTPSConnection
+            if self.scheme == "https"
+            else http.client.HTTPConnection
+        )
+        connection = connection_class(self.host, self.port, timeout=self.timeout)
+        target = urllib.parse.urlunsplit(
+            ("", "", parsed_url.path or "/", parsed_url.query, "")
+        )
+        try:
+            connection.request(
+                "GET",
+                target,
+                headers={"User-Agent": "Mozilla/5.0 TCL-HH515LM-Restart-Script/1.0"},
+            )
+            response = connection.getresponse()
+            content = response.read(max_size + 1)
+            if response.status >= 400:
+                raise RouterError(f"Panel routera zwrócił HTTP {response.status}.")
+            if len(content) > max_size:
+                raise RouterError("Plik panelu routera przekracza bezpieczny limit rozmiaru.")
+            return content.decode("utf-8")
+        except (OSError, TimeoutError, http.client.HTTPException, UnicodeDecodeError) as error:
+            raise RouterError(f"Nie udało się pobrać {url}: {error}") from error
+        finally:
+            connection.close()
+
+    def discover_protocol_constants(self) -> None:
+        """Odczytuje stałe protokołu z pakietu JavaScript bieżącego firmware."""
+        panel_html = self._get_text(self.panel_url, MAX_HTML_SIZE)
+        parser = ScriptSourceParser()
+        parser.feed(panel_html)
+        app_sources = [
+            source
+            for source in parser.sources
+            if re.search(r"(?:^|/)app(?:\.[^/?]+)?\.js(?:\?|$)", source)
+        ]
+        if not app_sources:
+            raise RouterError("Nie znaleziono głównego skryptu JavaScript panelu routera.")
+
+        script_url = urllib.parse.urljoin(self.panel_url, app_sources[-1])
+        script = self._get_text(script_url, MAX_SCRIPT_SIZE)
+
+        verification_match = re.search(
+            r'(["\'])(_TclRequestVerificationKey)\1\s*,\s*'
+            r'[A-Za-z_$][\w$]*=(["\'])([A-Za-z0-9_]{32,256})\3',
+            script,
+        )
+        token_header_match = re.search(
+            r'(["\'])(_TclRequestVerificationToken)\1', script
+        )
+        username_match = re.search(
+            r'([A-Za-z_$][\w$]*)=\[\[([\d,\-]+)\],\[([\d,\-]+)\]\]'
+            r'.{0,1500}?encryptKey:[A-Za-z_$][\w$]*\(\1\[1\]\)',
+            script,
+        )
+        api_path_match = re.search(
+            r'\.basePath=(["\'])(/[^"\']+)\1', script
+        )
+        default_username_match = re.search(
+            r'\.userName,[A-Za-z_$][\w$]*=void 0===[A-Za-z_$][\w$]*\?'
+            r'(["\'])([^"\']+)\1',
+            script,
+        )
+        if not all(
+            (
+                verification_match,
+                token_header_match,
+                username_match,
+                api_path_match,
+                default_username_match,
+            )
+        ):
+            raise RouterError(
+                "Nie udało się odczytać stałych protokołu z tego firmware. "
+                "Układ panelu WWW może być nieobsługiwany."
+            )
+
+        encoded_username_key = [int(value) for value in username_match.group(3).split(",")]
+        first = encoded_username_key[0]
+        username_key = chr(first) + "".join(
+            chr(first - value) for value in encoded_username_key[1:]
+        )
+        if not username_key.isalnum() or len(username_key) < 16:
+            raise RouterError("Odczytany klucz kodowania użytkownika jest nieprawidłowy.")
+
+        api_path = api_path_match.group(2)
+        if not api_path.startswith("/") or "?" in api_path or "#" in api_path:
+            raise RouterError("Odczytana ścieżka API routera jest nieprawidłowa.")
+
+        self.api_path = api_path
+        self.verification_header = verification_match.group(2)
+        self.verification_key = verification_match.group(4)
+        self.token_header = token_header_match.group(2)
+        self.username_key = username_key
+        self.default_username = default_username_match.group(2)
 
     def _post_raw(
         self, method: str, params: Any, *, encrypted: bool, hmac_value: str = ""
@@ -121,12 +251,12 @@ class TclRouterApi:
             "Origin": self.origin,
             "Referer": f"{self.origin}/",
             "User-Agent": "Mozilla/5.0 TCL-HH515LM-Restart-Script/1.0",
-            "_TclRequestVerificationKey": VERIFICATION_KEY,
+            self.verification_header: self.verification_key,
         }
         if self.session_id:
             headers["sessionid"] = self.session_id
         if self.token:
-            headers["_TclRequestVerificationToken"] = self.token
+            headers[self.token_header] = self.token
 
         connection_class = (
             http.client.HTTPSConnection
@@ -169,6 +299,7 @@ class TclRouterApi:
         return result
 
     def establish_session(self) -> None:
+        self.discover_protocol_constants()
         public_key_result = self._post_raw("GetPubKey", {}, encrypted=False)
         public_key_pem = public_key_result.get("publicKey", "").replace("\\n", "\n")
         if not public_key_pem:
@@ -208,7 +339,7 @@ class TclRouterApi:
         encrypted = encrypt_payload(plaintext, self.tmp_key)
         return self._post_raw(method, encrypted, encrypted=True, hmac_value=signature)
 
-    def login(self, username: str, password: str) -> None:
+    def login(self, username: str | None, password: str) -> None:
         device_state = self.call("GetDeviceSt")
         salt = device_state.get("Salt")
         if not salt:
@@ -219,7 +350,12 @@ class TclRouterApi:
         ).hex()
         result = self.call(
             "Login",
-            {"UserName": encode_username(username), "Password": password_hash},
+            {
+                "UserName": encode_username(
+                    username or self.default_username, self.username_key
+                ),
+                "Password": password_hash,
+            },
         )
         self.token = result.get("token", "")
         if not self.token:
@@ -234,15 +370,26 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Restart routera TCL 5G CPE HH515LM przez lokalne API."
     )
-    parser.add_argument("--url", default="http://192.168.1.1", help="Adres routera")
-    parser.add_argument("--user", default="admin", help="Użytkownik panelu")
+    parser.add_argument(
+        "--url",
+        default=os.environ.get("TCL_ROUTER_URL"),
+        help="Adres routera (lub zmienna TCL_ROUTER_URL)",
+    )
+    parser.add_argument(
+        "--user",
+        default=os.environ.get("TCL_ROUTER_USER"),
+        help="Techniczna nazwa użytkownika; zwykle wykrywana z firmware",
+    )
     parser.add_argument("--timeout", type=float, default=10.0, help="Timeout w sekundach")
     parser.add_argument(
         "--probe",
         action="store_true",
         help="Tylko sprawdź API i szyfrowanie; bez logowania i restartu",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not args.url:
+        parser.error("podaj --url albo ustaw zmienną TCL_ROUTER_URL")
+    return args
 
 
 def main() -> int:
