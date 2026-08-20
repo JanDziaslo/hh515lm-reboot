@@ -12,6 +12,7 @@ import http.client
 from html.parser import HTMLParser
 import json
 import os
+from pathlib import Path
 import re
 import secrets
 import shutil
@@ -27,9 +28,10 @@ try:
     from cryptography.hazmat.primitives.asymmetric import padding as asymmetric_padding
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    from dotenv import load_dotenv
 except ImportError as error:
     raise SystemExit(
-        "Brakuje biblioteki 'cryptography'. Uruchom: "
+        "Brakuje wymaganej biblioteki. Uruchom: "
         "python3 -m pip install -r requirements.txt"
     ) from error
 
@@ -433,8 +435,21 @@ def monitor_connection(args: argparse.Namespace, password: str) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    env_parser = argparse.ArgumentParser(add_help=False)
+    env_parser.add_argument("--env-file")
+    env_args, _ = env_parser.parse_known_args()
+    env_path = Path(env_args.env_file) if env_args.env_file else Path.cwd() / ".env"
+    if env_args.env_file and not env_path.is_file():
+        env_parser.error(f"plik .env nie istnieje: {env_path}")
+    if env_path.is_file():
+        load_dotenv(dotenv_path=env_path, override=False)
+
     parser = argparse.ArgumentParser(
         description="Restart routera TCL 5G CPE HH515LM przez lokalne API."
+    )
+    parser.add_argument(
+        "--env-file",
+        help="Ścieżka do pliku .env (domyślnie: .env w bieżącym katalogu)",
     )
     parser.add_argument(
         "--url",

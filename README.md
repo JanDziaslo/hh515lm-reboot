@@ -8,7 +8,7 @@ Skrypt zweryfikowano na TCL 5G CPE HH515LM. Przy każdym uruchomieniu odczytuje 
 
 - Linux,
 - Python 3,
-- biblioteka `cryptography`.
+- biblioteki `cryptography` i `python-dotenv`.
 
 Zainstaluj zależności z [`requirements.txt`](requirements.txt):
 
@@ -64,6 +64,20 @@ python3 router_restart.py
 unset TCL_ROUTER_URL
 ```
 
+Skrypt automatycznie ładuje zmienne z pliku `.env` w bieżącym katalogu. Aby rozpocząć, skopiuj szablon i uzupełnij własne wartości:
+
+```sh
+cp .env.example .env
+```
+
+Plik [`.env.example`](.env.example) zawiera wyłącznie przykładowe wartości i nie zawiera prawdziwych danych dostępowych. Plik `.env` jest ignorowany przez Git; nie commituj go ani hasła do routera. Inny plik można wskazać opcją `--env-file ŚCIEŻKA`:
+
+```sh
+python3 router_restart.py --env-file /ścieżka/do/router.env
+```
+
+Wartości zmiennych już ustawionych w środowisku mają pierwszeństwo przed wartościami z pliku `.env`, a argumenty CLI nadpisują odpowiadające im wartości ze środowiska.
+
 Przykład automatyzacji z sekretem zamontowanym poza repozytorium (np. przez menedżer sekretów używany przez usługę lub kontener):
 
 ```sh
@@ -74,6 +88,7 @@ TCL_ROUTER_URL=http://ADRES_ROUTERA \
 
 Dostępne opcje:
 
+- `--env-file` — ścieżka do pliku `.env`; domyślnie skrypt ładuje `.env` z bieżącego katalogu,
 - `--url` — wymagany adres routera; alternatywnie zmienna `TCL_ROUTER_URL`,
 - `--user` — opcjonalne nadpisanie technicznej nazwy użytkownika wykrywanej z firmware; alternatywnie zmienna `TCL_ROUTER_USER`,
 - `--timeout` — limit czasu w sekundach (domyślnie `10`),
