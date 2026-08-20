@@ -32,6 +32,21 @@ Restart interaktywny (hasło zostanie odczytane bez wyświetlania):
 python3 router_restart.py --url http://ADRES_ROUTERA
 ```
 
+Bez opcji `--monitor` skrypt zachowuje dotychczasowe działanie: od razu wykonuje pojedynczy, ręczny restart routera. W trybie monitorowania proces skryptu pozostaje uruchomiony, ale pojedyncza komenda `ping` jest wykonywana tylko w ustalonych odstępach:
+
+```sh
+python3 router_restart.py \
+  --url http://ADRES_ROUTERA \
+  --monitor \
+  --ping-target 8.8.8.8 \
+  --check-interval 60 \
+  --failure-threshold 3 \
+  --ping-timeout 3 \
+  --restart-cooldown 120
+```
+
+Domyślnie skrypt odpytuje `8.8.8.8` co `60` sekund, uznaje `3` kolejne błędy za próg restartu, czeka na pojedynczy ping do `3` sekund i po restarcie stosuje cooldown `120` sekund. Udany ping zeruje licznik błędów. Po osiągnięciu progu skrypt loguje się do routera i wykonuje `SetDeviceReboot`, po czym przed wznowieniem kontroli odczekuje cooldown. Nie ustawiaj zbyt niskiego progu błędów, ponieważ krótkotrwała utrata pakietów może wtedy powodować niepotrzebne restarty.
+
 Hasło nie jest zapisane w kodzie. Skrypt pobiera je z bezpiecznego promptu, a w pracy automatycznej ze zmiennej `TCL_ROUTER_PASSWORD`. Nie wpisuj hasła w poleceniu ani nie zapisuj go w repozytorium. Do ręcznego uruchomienia bez pozostawiania hasła w historii powłoki:
 
 ```sh
@@ -62,7 +77,13 @@ Dostępne opcje:
 - `--url` — wymagany adres routera; alternatywnie zmienna `TCL_ROUTER_URL`,
 - `--user` — opcjonalne nadpisanie technicznej nazwy użytkownika wykrywanej z firmware; alternatywnie zmienna `TCL_ROUTER_USER`,
 - `--timeout` — limit czasu w sekundach (domyślnie `10`),
-- `--probe` — sprawdza dostępność API i szyfrowanie przez `GetDeviceSt`, bez logowania i restartu.
+- `--probe` — sprawdza dostępność API i szyfrowanie przez `GetDeviceSt`, bez logowania i restartu,
+- `--monitor` — utrzymuje proces i okresowo sprawdza połączenie zamiast od razu restartować router,
+- `--ping-target` — adres sprawdzany przez ping (domyślnie `8.8.8.8`); alternatywnie zmienna `TCL_PING_TARGET`,
+- `--check-interval` — odstęp między kontrolami w sekundach (domyślnie `60`); alternatywnie zmienna `TCL_CHECK_INTERVAL`,
+- `--failure-threshold` — liczba kolejnych błędów przed restartem (domyślnie `3`); alternatywnie zmienna `TCL_FAILURE_THRESHOLD`,
+- `--ping-timeout` — timeout pojedynczego pingu w sekundach (domyślnie `3`); alternatywnie zmienna `TCL_PING_TIMEOUT`,
+- `--restart-cooldown` — cooldown po restarcie w sekundach (domyślnie `120`); alternatywnie zmienna `TCL_RESTART_COOLDOWN`.
 
 ## Bezpieczeństwo
 

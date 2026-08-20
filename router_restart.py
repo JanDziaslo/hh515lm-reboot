@@ -14,7 +14,9 @@ import json
 import os
 import re
 import secrets
+import shutil
 import string
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -56,6 +58,20 @@ class ScriptSourceParser(HTMLParser):
 
 class RouterError(RuntimeError):
     """Błąd komunikacji z API routera lub odpowiedź odrzucona przez router."""
+
+
+def positive_float(value: str) -> float:
+    number = float(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("wartość musi być większa od zera")
+    return number
+
+
+def positive_int(value: str) -> int:
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("wartość musi być większa od zera")
+    return number
 
 
 def compact_json(value: Any) -> str:
@@ -366,6 +382,56 @@ class TclRouterApi:
         self.call("SetDeviceReboot", {})
 
 
+def ping_succeeds(target: str, timeout: int) -> bool:
+    """Wykonuje pojedynczy ping; proces działa tylko przez czas jednej kontroli."""
+    ping_command = shutil.which("ping")
+    if not ping_command:
+        raise RouterError("Nie znaleziono polecenia 'ping' w systemie.")
+    result = subprocess.run(
+        [ping_command, "-c", "1", "-W", str(timeout), target],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def restart_router(args: argparse.Namespace, password: str) -> None:
+    api = TclRouterApi(args.url, args.timeout)
+    api.establish_session()
+    api.login(args.user, password)
+    api.restart()
+
+
+def monitor_connection(args: argparse.Namespace, password: str) -> None:
+    failures = 0
+    print(
+        f"Monitorowanie {args.ping_target} co {args.check_interval:g} s; "
+        f"restart po {args.failure_threshold} błędach.",
+        flush=True,
+    )
+    while True:
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        if ping_succeeds(args.ping_target, args.ping_timeout):
+            if failures:
+                print(f"[{timestamp}] Połączenie zostało przywrócone.", flush=True)
+            failures = 0
+        else:
+            failures += 1
+            print(
+                f"[{timestamp}] Brak odpowiedzi na ping "
+                f"({failures}/{args.failure_threshold}).",
+                flush=True,
+            )
+            if failures >= args.failure_threshold:
+                print(f"[{timestamp}] Restartuję router.", flush=True)
+                restart_router(args, password)
+                print("Polecenie restartu zostało przyjęte przez router.", flush=True)
+                failures = 0
+                time.sleep(args.restart_cooldown)
+        time.sleep(args.check_interval)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Restart routera TCL 5G CPE HH515LM przez lokalne API."
@@ -380,11 +446,48 @@ def parse_args() -> argparse.Namespace:
         default=os.environ.get("TCL_ROUTER_USER"),
         help="Techniczna nazwa użytkownika; zwykle wykrywana z firmware",
     )
-    parser.add_argument("--timeout", type=float, default=10.0, help="Timeout w sekundach")
     parser.add_argument(
+        "--timeout", type=positive_float, default="10", help="Timeout API w sekundach"
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--probe",
         action="store_true",
         help="Tylko sprawdź API i szyfrowanie; bez logowania i restartu",
+    )
+    mode.add_argument(
+        "--monitor",
+        action="store_true",
+        help="Okresowo sprawdzaj internet i restartuj router po serii błędów",
+    )
+    parser.add_argument(
+        "--ping-target",
+        default=os.environ.get("TCL_PING_TARGET", "8.8.8.8"),
+        help="Adres sprawdzany przez ping (domyślnie: 8.8.8.8)",
+    )
+    parser.add_argument(
+        "--check-interval",
+        type=positive_float,
+        default=os.environ.get("TCL_CHECK_INTERVAL", "60"),
+        help="Odstęp między kontrolami w sekundach (domyślnie: 60)",
+    )
+    parser.add_argument(
+        "--failure-threshold",
+        type=positive_int,
+        default=os.environ.get("TCL_FAILURE_THRESHOLD", "3"),
+        help="Liczba kolejnych błędów przed restartem (domyślnie: 3)",
+    )
+    parser.add_argument(
+        "--ping-timeout",
+        type=positive_int,
+        default=os.environ.get("TCL_PING_TIMEOUT", "3"),
+        help="Timeout pojedynczego pingu w sekundach (domyślnie: 3)",
+    )
+    parser.add_argument(
+        "--restart-cooldown",
+        type=positive_float,
+        default=os.environ.get("TCL_RESTART_COOLDOWN", "120"),
+        help="Przerwa po restarcie w sekundach (domyślnie: 120)",
     )
     args = parser.parse_args()
     if not args.url:
@@ -394,10 +497,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    api = TclRouterApi(args.url, args.timeout)
     try:
-        api.establish_session()
         if args.probe:
+            api = TclRouterApi(args.url, args.timeout)
+            api.establish_session()
             api.call("GetDeviceSt")
             print("API routera odpowiada poprawnie. Nie wykonano restartu.")
             return 0
@@ -410,8 +513,14 @@ def main() -> int:
                 )
             password = getpass.getpass("Hasło panelu routera: ")
 
-        api.login(args.user, password)
-        api.restart()
+        if args.monitor:
+            try:
+                monitor_connection(args, password)
+            except KeyboardInterrupt:
+                print("\nMonitorowanie zatrzymane.")
+                return 0
+
+        restart_router(args, password)
         print("Polecenie restartu zostało przyjęte przez router.")
         return 0
     except RouterError as error:
