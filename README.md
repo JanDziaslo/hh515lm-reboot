@@ -129,10 +129,10 @@ docker run --rm \
   --monitor
 ```
 
-Zbuduj obraz i uruchom ciągłe monitorowanie w tle:
+Uruchom ciągłe monitorowanie w tle. Przy uruchomieniu Compose pobiera aktualną wersję obrazu z tagiem `latest` z GHCR:
 
 ```sh
-docker compose up --build -d
+docker compose up -d
 ```
 
 Podgląd logów usługi:

@@ -129,10 +129,10 @@ docker run --rm \
   --monitor
 ```
 
-Build the image and start continuous monitoring in the background:
+Start continuous monitoring in the background. On startup, Compose pulls the current version of the image tagged `latest` from GHCR:
 
 ```sh
-docker compose up --build -d
+docker compose up -d
 ```
 
 View the service logs:

@@ -1,7 +1,7 @@
 services:
   hh515lm-reboot:
-    build:
-      context: .
+    image: ghcr.io/jandziaslo/hh515lm-reboot:latest
+    pull_policy: always
     network_mode: host
     env_file:
       - .env
