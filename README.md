@@ -113,6 +113,22 @@ cp .env.example .env
 
 > **Uwaga:** plik `.env` zawiera hasło do routera. Nie commituj go ani nie przekazuj do obrazu; konfiguracja [`.dockerignore`](.dockerignore) wyklucza go z kontekstu budowania.
 
+Każdy push do `main` buduje obraz wyłącznie dla `linux/amd64` i publikuje go w GHCR jako `ghcr.io/jandziaslo/hh515lm-reboot` z tagami `latest` oraz `sha-<pełny_commit_sha>`:
+
+```sh
+docker pull ghcr.io/jandziaslo/hh515lm-reboot:latest
+```
+
+Uruchomienie opublikowanego obrazu w trybie monitorowania:
+
+```sh
+docker run --rm \
+  --env-file .env \
+  --network host \
+  ghcr.io/jandziaslo/hh515lm-reboot:latest \
+  --monitor
+```
+
 Zbuduj obraz i uruchom ciągłe monitorowanie w tle:
 
 ```sh

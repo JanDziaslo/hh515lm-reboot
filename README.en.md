@@ -113,6 +113,22 @@ cp .env.example .env
 
 > **Note:** the `.env` file contains the router password. Do not commit it or pass it into the image; the [`.dockerignore`](.dockerignore) configuration excludes it from the build context.
 
+Every push to `main` builds the image for `linux/amd64` only and publishes it to GHCR as `ghcr.io/jandziaslo/hh515lm-reboot` with the `latest` and `sha-<full_commit_sha>` tags:
+
+```sh
+docker pull ghcr.io/jandziaslo/hh515lm-reboot:latest
+```
+
+Run the published image in monitoring mode:
+
+```sh
+docker run --rm \
+  --env-file .env \
+  --network host \
+  ghcr.io/jandziaslo/hh515lm-reboot:latest \
+  --monitor
+```
+
 Build the image and start continuous monitoring in the background:
 
 ```sh
