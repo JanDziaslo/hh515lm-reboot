@@ -466,6 +466,11 @@ def parse_args() -> argparse.Namespace:
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
+        "--restart",
+        action="store_true",
+        help="Wykonaj pojedynczy restart (jest to zachowanie domyślne)",
+    )
+    mode.add_argument(
         "--probe",
         action="store_true",
         help="Tylko sprawdź API i szyfrowanie; bez logowania i restartu",

@@ -92,6 +92,7 @@ Dostępne opcje:
 - `--url` — wymagany adres routera; alternatywnie zmienna `TCL_ROUTER_URL`,
 - `--user` — opcjonalne nadpisanie technicznej nazwy użytkownika wykrywanej z firmware; alternatywnie zmienna `TCL_ROUTER_USER`,
 - `--timeout` — limit czasu w sekundach (domyślnie `10`),
+- `--restart` — wykonuje pojedynczy restart; jest jawnym odpowiednikiem domyślnego trybu ręcznego,
 - `--probe` — sprawdza dostępność API i szyfrowanie przez `GetDeviceSt`, bez logowania i restartu,
 - `--monitor` — utrzymuje proces i okresowo sprawdza połączenie zamiast od razu restartować router,
 - `--ping-target` — adres sprawdzany przez ping (domyślnie `8.8.8.8`); alternatywnie zmienna `TCL_PING_TARGET`,
@@ -99,6 +100,50 @@ Dostępne opcje:
 - `--failure-threshold` — liczba kolejnych błędów przed restartem (domyślnie `3`); alternatywnie zmienna `TCL_FAILURE_THRESHOLD`,
 - `--ping-timeout` — timeout pojedynczego pingu w sekundach (domyślnie `3`); alternatywnie zmienna `TCL_PING_TIMEOUT`,
 - `--restart-cooldown` — cooldown po restarcie w sekundach (domyślnie `120`); alternatywnie zmienna `TCL_RESTART_COOLDOWN`.
+
+## Docker
+
+Skopiuj [`.env.example`](.env.example) do `.env` i uzupełnij wartości adresem routera, hasłem oraz ustawieniami monitorowania:
+
+```sh
+cp .env.example .env
+```
+
+> **Uwaga:** plik `.env` zawiera hasło do routera. Nie commituj go ani nie przekazuj do obrazu; konfiguracja [`.dockerignore`](.dockerignore) wyklucza go z kontekstu budowania.
+
+Zbuduj obraz i uruchom ciągłe monitorowanie w tle:
+
+```sh
+docker compose up --build -d
+```
+
+Podgląd logów usługi:
+
+```sh
+docker compose logs -f hh515lm-reboot
+```
+
+Zatrzymanie i usunięcie usługi:
+
+```sh
+docker compose down
+```
+
+Ręczny, pojedynczy restart routera można wykonać osobnym, tymczasowym kontenerem:
+
+```sh
+docker compose run --rm hh515lm-reboot --restart
+```
+
+Bezpieczny probe API i szyfrowania, bez logowania i restartu:
+
+```sh
+docker compose run --rm hh515lm-reboot --probe
+```
+
+Plik [`compose.yaml`](compose.yaml) używa `network_mode: host`, aby kontener miał bezpośredni dostęp do routera w sieci LAN. Rozwiązanie jest przeznaczone przede wszystkim dla Docker Engine na Linuxie. W Docker Desktop wymaga obsługi i włączenia host networking.
+
+Kontener działa jako użytkownik bez uprawnień roota, z systemem plików tylko do odczytu i ustawieniem `no-new-privileges`. Wszystkie capabilities są odbierane, a następnie dodawane jest wyłącznie `NET_RAW`, wymagane przez polecenie `ping` używane do monitorowania.
 
 ## Bezpieczeństwo
 

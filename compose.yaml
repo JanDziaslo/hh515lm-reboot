@@ -1,0 +1,18 @@
+services:
+  hh515lm-reboot:
+    build:
+      context: .
+    network_mode: host
+    env_file:
+      - .env
+    command:
+      - --monitor
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
+    security_opt:
+      - no-new-privileges:true
